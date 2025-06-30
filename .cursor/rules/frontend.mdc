@@ -1,0 +1,4 @@
+Scope: **/*.tsx
+Rules:
+- Use functional components + React hooks
+- Stick to TypeScript strict mode

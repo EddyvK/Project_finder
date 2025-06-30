@@ -1,0 +1,65 @@
+Scope: api/**/*.py
+Rules:
+Backend Development: Cursor Rules & Best Practices
+This document outlines "cursor rules" for the backend, focusing on guiding developers' interactions and navigation within the codebase, as well as best practices related to data handling and code structure. These rules aim to enhance productivity, maintainability, and collaboration.
+
+1. Code Navigation & Structure Rules
+These rules guide how you should move The Editor through the codebase to understand and modify it efficiently.
+
+Rule 1.1: Follow PEP 8 (Cursor Discipline): When navigating or writing Python code, The Editor should always respect PEP 8 guidelines. This includes:
+
+Indentation: Always 4 spaces. The Editor should never rest on or create inconsistent indentation.
+
+Line Length: Strive for 79 characters. The Editor should be mindful of wrapping lines clearly.
+
+Blank Lines: Two blank lines before top-level functions/classes, one before class methods. 
+
+Rule 1.2: Docstring First: When entering a new function or class, The Editor should immediately jump to read its docstring. Docstrings are the primary source of truth for purpose, I/O, and methodology.
+
+Rule 1.3: Grouped Imports Scan: When reviewing a file, The Editor should start by scanning the grouped and alphabetically sorted imports. This quickly informs you of external dependencies and internal modules used.
+
+Rule 1.4: Endpoint Path Alignment: When investigating an API endpoint, The Editor should trace the URL definition from the frontend request to the backend router, ensuring consistent /api/ prefixes and parameter usage.
+
+Rule 1.5: Model Definition Priority: When dealing with data, The Editor should first refer to backend/core_models.py for SQLAlchemy model definitions and schemas.py for Pydantic validation models, as these define the data structure.
+
+2. Data Access & Transaction Rules
+These rules pertain to how The Editor should interact with code handling database operations, considering the implicit "cursor" in database transactions.
+
+Rule 2.1: Atomic Database Interactions: When The Editor is within a function performing a database write (add, update, delete), ensure the entire operation is self-contained and ideally transactional. Avoid partial updates that could leave the database in an inconsistent state.
+
+Rule 2.2: Context Manager for DB Sessions: The Editor should always operate within a database session context (with Session() as session:). This ensures sessions are properly opened and closed, preventing resource leaks.
+
+Rule 2.3: onSnapshot / Real-time Listener Focus: When dealing with data that requires real-time updates (if Firestore were used, which is currently not in scope but mentioned in general guidelines), The Editor should ensure onSnapshot listeners are correctly set up and managed (though for SQLite, this is less relevant, but for future scaling, keep in mind).
+
+Rule 2.4: __app_id and userId Strictness: When manipulating database paths (especially for Firestore if it were introduced for multi-user capabilities), The Editor must explicitly use __app_id and derive userId from authentication (auth.currentUser?.uid or crypto.randomUUID()) to ensure data isolation and security. Never hardcode these.
+
+3. Error Handling & Logging Rules
+These rules dictate how The Editor interacts with code sections responsible for robustness and observability.
+
+Rule 3.1: Specific Exception Capture: When adding try-except blocks, The Editor must always specify concrete exception types (e.g., except ValueError as e:), never bare except:.
+
+Rule 3.2: Log Immediately on Catch: Upon catching an exception, The Editor should immediately move to add a logging statement (logger.error(...)) that provides context and the exception details.
+
+Rule 3.3: Debugging Logging Placement: When debugging, The Editor should strategically place logger.debug() statements to trace the flow of execution, especially around API calls and data transformations.
+
+Rule 3.4: No alert() or confirm() (Frontend/Backend): The Editor must never type alert() or confirm() in either backend or frontend code. Use custom UI modals for user feedback.
+
+4. API Endpoint Design Rules
+These rules guide The Editor in structuring API endpoints for clarity and consistency.
+
+Rule 4.1: Pydantic Input Validation First: When defining a new API endpoint, The Editor should immediately define the Pydantic model for input data validation. This ensures clean, validated data enters your business logic.
+
+Rule 4.2: Consistent Response Format: The Editor should ensure that all API endpoints return consistent JSON response formats for both success and error scenarios.
+
+Rule 4.3: Swagger Documentation Priority: After defining an endpoint's logic, The Editor should immediately move to ensure it's properly documented for Swagger/OpenAPI.
+
+5. Testing & Debugging Rules
+These rules guide The Editor's movement during the testing and debugging phases.
+
+Rule 5.1: Test File Entry Point: When a bug is identified, The Editor should first navigate to the relevant test_*.py file in the tests/ directory to reproduce the issue via a test.
+
+Rule 5.2: Arrange-Act-Assert Delimitation: When writing or reviewing tests, The Editor should visually separate the Arrange, Act, and Assert sections within each test function.
+
+Rule 5.3: Linter Scan Before Commit: Before committing any changes, The Editor should perform a final scan of the modified files, mentally (or physically via IDE) checking against flake8 warnings and errors.
+
+[FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).

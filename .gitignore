@@ -1,0 +1,33 @@
+# === FRONTEND (React) ===
+frontend/node_modules/
+frontend/build/
+frontend/dist/
+frontend/.env
+frontend/.parcel-cache/
+frontend/.next/
+frontend/.turbo/
+
+# === BACKEND (Python/FastAPI) ===
+backend/venv/
+backend/__pycache__/
+backend/*.pyc
+backend/.env
+backend/.mypy_cache/
+backend/.pytest_cache/
+backend/.coverage
+backend/.ruff_cache/
+backend/.pdm-python/
+
+# === IDEs and OS ===
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# === Git ===
+*.log
+*.bak
+*.tmp
+*.orig

@@ -1,0 +1,80 @@
+{
+    "websites": [
+        {
+            "level1_search": {
+                "site_url": "https://www.etengo.de/it-projektsuche/",
+                "name": "Etengo",
+                "project-list-selector": "#project-grid, .project-grid",
+                "project-entry-selector": ".card.card-project",
+                "next-page-selector": ".loadMore.project-load-more button"
+            },
+            "level2_search": {
+                "title-selector": "h3.headline-4 a",
+                "url-selector": "h3.headline-4 a",
+                "project-id-selector": ".box-50 span",
+                "project-id-label": "Pr.ID",
+                "location-selector": ".box-50 span",
+                "location-label": "PLZ",
+                "duration-selector": ".box-50 span",
+                "duration-label": "Laufzeit",
+                "start-date-selector": ".box-50 span",
+                "start-date-label": "Start",
+                "release-date-selector": "",
+                "release-date-label": "",
+                "industry-selector": ".box-100 span",
+                "industry-label": "Branche",
+                "tenderer": "Etengo",
+                "rate": "N/A"
+            }
+        },
+        {
+            "level1_search": {
+                "site_url": "https://www.freelancermap.de/projektboerse.html",
+                "name": "Freelancermap",
+                "project-list-selector": ".project-list",
+                "project-entry-selector": ".project-container",
+                "next-page-selector": ".paginator .next"
+            },
+            "level2_search": {
+                "title-selector": "a.project-title",
+                "url-selector": "a.project-title",
+                "project-id-selector": "",
+                "project-id-label": "",
+                "location-selector": ".project-location",
+                "location-label": "",
+                "duration-selector": "",
+                "duration-label": "",
+                "start-date-selector": "",
+                "start-date-label": "",
+                "release-date-selector": "span.created-date",
+                "release-date-label": "eingetragen am:",
+                "industry-selector": ".keywords-container .keyword",
+                "industry-label": "",
+                "tenderer-selector": ".company",
+                "tenderer": "Freelancermap",
+                "rate": "N/A"
+            }
+        }
+    ],
+    "database": {
+        "url": "sqlite:///./project_finder.db"
+    },
+    "server": {
+        "host": "0.0.0.0",
+        "port": 8000
+    },
+    "logging": {
+        "level": "INFO",
+        "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        "file": "app.log",
+        "max_bytes": 10485760,
+        "backup_count": 5
+    },
+    "distance_model": {
+        "model": "cosine"
+    },
+    "matching": {
+        "threshold": 0.9,
+        "description": "Minimum similarity threshold for skill matching (0.0-1.0). Higher values make matching more strict."
+    }
+}
