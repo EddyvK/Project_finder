@@ -6,7 +6,8 @@
                 "name": "Etengo",
                 "project-list-selector": "#project-grid, .project-grid",
                 "project-entry-selector": ".card.card-project",
-                "next-page-selector": ".loadMore.project-load-more button"
+                "next-page-selector": "N/A",
+                "load-more-selector": ".loadMore.project-load-more button"
             },
             "level2_search": {
                 "title-selector": "h3.headline-4 a",
@@ -33,7 +34,7 @@
                 "name": "Freelancermap",
                 "project-list-selector": ".project-list",
                 "project-entry-selector": ".project-container",
-                "next-page-selector": ".paginator .next"
+                "next-page-selector": "a.next, .pagination a[href*='pagenr=']"
             },
             "level2_search": {
                 "title-selector": "a.project-title",
@@ -53,6 +54,39 @@
                 "tenderer-selector": ".company",
                 "tenderer": "Freelancermap",
                 "rate": "N/A"
+            }
+        },
+        {
+            "level1_search": {
+                "site_url": "https://www.gulp.de/gulp2/g/projekte?page=1",
+                "name": "Randstad",
+                "project-list-selector": "div.paginated-list-container ul",
+                "project-entry-selector": "li div.list-result-item",
+                "next-page-selector": ".next"
+            },
+            "level2_search": {
+                "title-selector": "h1 a",
+                "url-selector": "h1 a",
+                "project-id-selector": "",
+                "project-id-label": "",
+                "location-selector": "li span",
+                "location-label": "Einsatzort:",
+                "duration-selector": "",
+                "duration-label": "",
+                "start-date-selector": "li span",
+                "start-date-label": "Startdatum:",
+                "release-date-selector": "small.time-ago",
+                "release-date-label": "",
+                "industry-selector": ".skills .label",
+                "industry-label": "",
+                "tenderer-selector": "li span",
+                "tenderer-label": "Projektanbieter:",
+                "tenderer": "Randstad",
+                "rate": "N/A"
+            },
+            "level3_search": {
+                "external-url-selector": "a.apply-button[href*='project_url=']",
+                "external-url-param": "project_url"
             }
         }
     ],

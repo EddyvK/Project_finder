@@ -114,6 +114,9 @@ class MatchingService:
         - Returns a list of compatible projects with match percentages and missing skills.
         """
         try:
+            # Ensure IDF factors are up to date before matching
+            tfidf_service.update_skills_idf_factors(db)
+
             # Use config threshold if not provided
             if threshold is None:
                 threshold = config_manager.get_matching_threshold()

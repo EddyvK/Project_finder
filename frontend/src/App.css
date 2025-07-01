@@ -321,6 +321,21 @@ textarea.input {
   font-weight: 400;
 }
 
+.project-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 0.25rem;
+}
+
+.project-tenderer {
+  font-size: 0.75rem;
+  color: #6b7280;
+  font-weight: 400;
+  font-style: italic;
+}
+
 .project-title {
   font-size: 0.9rem;
   font-weight: 500;
@@ -482,7 +497,7 @@ textarea.input {
 }
 
 .project-title {
-  font-size: 1.25rem;
+  font-size: 1rem;
   font-weight: 600;
   color: #111827;
   margin-bottom: 1rem;
@@ -502,11 +517,15 @@ textarea.input {
   color: #374151;
 }
 
-.project-meta {
+/* Project Contents specific styles */
+.project-contents .project-meta {
   margin-bottom: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
-.meta-item {
+.project-contents .meta-item {
   display: flex;
   justify-content: space-between;
   padding: 0.5rem 0;

@@ -7,15 +7,11 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      // Proxy all API-related paths to backend with /api prefix
-      '^/(projects|employees|scan|matches|embeddings|database|state)': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-        rewrite: (path) => `/api${path}`,
-      },
+      // Proxy all /api requests to backend
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
+        secure: false,
       },
     },
   },

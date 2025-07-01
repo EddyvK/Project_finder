@@ -95,10 +95,15 @@ export class SSEStream {
         console.log('SSE: Parsed event data:', data);
 
         // Track completion status
-        if (data.type === 'complete') {
+        if (data.type === 'complete' || data.type === 'cancelled') {
           this.hasCompleted = true;
           this.preventReconnect = true; // Prevent future reconnections
-          console.log('SSE: Scan completed, will close connection and prevent reconnection');
+          console.log(`SSE: Scan ${data.type}, will close connection and prevent reconnection`);
+
+          // Immediately close the connection after processing the complete/cancelled event
+          setTimeout(() => {
+            this.disconnect();
+          }, 100);
         }
 
         this.onEvent(data);
@@ -129,6 +134,8 @@ export class SSEStream {
         }
       } else {
         console.log('SSE: Connection closed after normal completion or manual disconnect');
+        // Ensure we don't try to reconnect after normal completion
+        this.preventReconnect = true;
       }
     };
 

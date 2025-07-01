@@ -287,8 +287,8 @@ const EmployeeFit: React.FC<EmployeeFitProps> = ({ onProjectSelect }) => {
       .map(([skill, count]) => ({ skill, count }))
       .sort((a, b) => b.count - a.count);
 
-    // Return top 4 most missing skills
-    return sortedMissingSkills.slice(0, 4);
+    // Return top 6 most missing skills
+    return sortedMissingSkills.slice(0, 6);
   };
 
   const handleRemoveEmployee = async () => {

@@ -10,6 +10,12 @@ from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException
 import time
 from urllib.parse import urlparse, urljoin
+
+# Suppress noisy logging from external libraries
+logging.getLogger('urllib3').setLevel(logging.ERROR)
+logging.getLogger('selenium').setLevel(logging.WARNING)
+logging.getLogger('WDM').setLevel(logging.ERROR)
+
 # Try to import from backend first, then fall back to direct import
 try:
     from backend.config_manager import config_manager
@@ -49,6 +55,18 @@ class WebScraper:
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--window-size=1920,1080")
         chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+        # Suppress DevTools and TensorFlow warnings
+        chrome_options.add_argument("--disable-logging")
+        chrome_options.add_argument("--log-level=3")  # Only fatal errors
+        chrome_options.add_argument("--silent")
+        chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
+
+        # Suppress DevTools listening messages
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
+
         driver = webdriver.Chrome(options=chrome_options)
         driver.set_page_load_timeout(30)
         return driver
@@ -226,9 +244,15 @@ class WebScraper:
             if not next_page_selector:
                 return False
 
-            # Find and click the load more button
-            wait = WebDriverWait(driver, 10)
-            load_more_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, next_page_selector)))
+            # Check if load more button exists and is visible
+            try:
+                load_more_button = driver.find_element(By.CSS_SELECTOR, next_page_selector)
+                if not load_more_button.is_displayed():
+                    logger.info("Load more button is not visible, no more projects to load")
+                    return False
+            except Exception:
+                logger.info("Load more button not found, no more projects to load")
+                return False
 
             # Get current project count
             project_entry_selector = website_config["level1_search"]["project-entry-selector"]
@@ -240,6 +264,7 @@ class WebScraper:
 
             # Wait for new content to load (wait for more projects to appear)
             try:
+                wait = WebDriverWait(driver, 10)
                 wait.until(lambda d: len(d.find_elements(By.CSS_SELECTOR, project_entry_selector)) > current_count)
                 logger.info("New projects loaded successfully")
                 return True
@@ -504,7 +529,7 @@ class WebScraper:
             scraper_logger.debug(f"Error extracting card: {e}")
         return data
 
-    async def level3_scan(self, project_url: str, scan_id: str = None) -> Dict[str, Any]:
+    async def level3_scan(self, project_url: str, scan_id: str = None, website_config: Dict[str, Any] = None) -> Dict[str, Any]:
         """Take a single URL, return requirements using Mistral AI."""
         if not self.mistral_handler:
             if scan_id:
@@ -513,7 +538,102 @@ class WebScraper:
                 scraper_logger = logging.getLogger(__name__)
             scraper_logger.warning("Mistral handler not available for Level 3 scan")
             return {"requirements": []}
+
+        # Check if this is a Randstad project that needs external URL extraction
+        if website_config and website_config.get("level3_search"):
+            try:
+                external_url = await self._extract_external_url(project_url, website_config, scan_id)
+                if external_url:
+                    # Use the external URL for the actual level3 scan
+                    return await self._extract_project_data_with_mistral(external_url, scan_id)
+                else:
+                    # Fallback to original URL if external URL extraction fails
+                    if scan_id:
+                        scraper_logger = logging.getLogger(f"scan.{scan_id}.webscraper")
+                    else:
+                        scraper_logger = logging.getLogger(__name__)
+                    scraper_logger.warning(f"Failed to extract external URL from {project_url}, using original URL")
+                    return await self._extract_project_data_with_mistral(project_url, scan_id)
+            except Exception as e:
+                if scan_id:
+                    scraper_logger = logging.getLogger(f"scan.{scan_id}.webscraper")
+                else:
+                    scraper_logger = logging.getLogger(__name__)
+                scraper_logger.error(f"Error extracting external URL: {e}, using original URL")
+                return await self._extract_project_data_with_mistral(project_url, scan_id)
+
+        # Default behavior for other websites
         return await self._extract_project_data_with_mistral(project_url, scan_id)
+
+    async def _extract_external_url(self, project_url: str, website_config: Dict[str, Any], scan_id: str = None) -> str:
+        """Extract the external project URL from the project detail page."""
+        try:
+            if scan_id:
+                scraper_logger = logging.getLogger(f"scan.{scan_id}.webscraper")
+            else:
+                scraper_logger = logging.getLogger(__name__)
+
+            scraper_logger.info(f"Extracting external URL from project detail page: {project_url}")
+
+            # Load the project detail page
+            driver = self.setup_driver()
+            driver.get(project_url)
+
+            # Wait for page to load
+            time.sleep(3)
+
+            # Get the page source
+            page_source = driver.page_source
+            driver.quit()
+
+            # Parse the HTML
+            soup = BeautifulSoup(page_source, 'html.parser')
+
+            # Find the external URL link using the selector from config
+            level3_config = website_config["level3_search"]
+            external_url_selector = level3_config.get("external-url-selector")
+            external_url_param = level3_config.get("external-url-param", "project_url")
+
+            if not external_url_selector:
+                scraper_logger.warning("No external URL selector configured")
+                return None
+
+            # Find the link element
+            link_element = soup.select_one(external_url_selector)
+            if not link_element:
+                scraper_logger.warning(f"No external URL link found with selector: {external_url_selector}")
+                return None
+
+            # Extract the href attribute
+            href = link_element.get('href')
+            if not href:
+                scraper_logger.warning("No href attribute found in external URL link")
+                return None
+
+            # Parse the URL to extract the project_url parameter
+            from urllib.parse import urlparse, parse_qs, unquote
+
+            parsed_url = urlparse(href)
+            query_params = parse_qs(parsed_url.query)
+
+            if external_url_param not in query_params:
+                scraper_logger.warning(f"Parameter '{external_url_param}' not found in URL: {href}")
+                return None
+
+            # Get and decode the external URL
+            encoded_external_url = query_params[external_url_param][0]
+            external_url = unquote(encoded_external_url)
+
+            scraper_logger.info(f"Successfully extracted external URL: {external_url}")
+            return external_url
+
+        except Exception as e:
+            if scan_id:
+                scraper_logger = logging.getLogger(f"scan.{scan_id}.webscraper")
+            else:
+                scraper_logger = logging.getLogger(__name__)
+            scraper_logger.error(f"Error extracting external URL: {e}")
+            return None
 
     async def _extract_project_data_with_mistral(self, project_url: str, scan_id: str = None) -> Dict[str, Any]:
         """Extract project data using Mistral AI from a project URL."""
@@ -547,7 +667,7 @@ class WebScraper:
             scraper_logger.error(f"Error extracting project data with Mistral: {e}")
             return {"requirements": [], "url": project_url}
 
-    async def quick_level3_scan(self, project_url: str, scan_id: str = None) -> Dict[str, Any]:
+    async def quick_level3_scan(self, project_url: str, scan_id: str = None, website_config: Dict[str, Any] = None) -> Dict[str, Any]:
         """Quick level3 scan to get just the release date for filtering."""
         if not self.mistral_handler:
             if scan_id:
@@ -558,6 +678,27 @@ class WebScraper:
             return {"release_date": None}
 
         try:
+            # Check if this is a Randstad project that needs external URL extraction
+            if website_config and website_config.get("level3_search"):
+                try:
+                    external_url = await self._extract_external_url(project_url, website_config, scan_id)
+                    if external_url:
+                        # Use the external URL for the quick level3 scan
+                        project_url = external_url
+                    else:
+                        # Fallback to original URL if external URL extraction fails
+                        if scan_id:
+                            scraper_logger = logging.getLogger(f"scan.{scan_id}.webscraper")
+                        else:
+                            scraper_logger = logging.getLogger(__name__)
+                        scraper_logger.warning(f"Failed to extract external URL from {project_url} for quick scan, using original URL")
+                except Exception as e:
+                    if scan_id:
+                        scraper_logger = logging.getLogger(f"scan.{scan_id}.webscraper")
+                    else:
+                        scraper_logger = logging.getLogger(__name__)
+                    scraper_logger.error(f"Error extracting external URL for quick scan: {e}, using original URL")
+
             # Get the page content
             driver = self.setup_driver()
             driver.get(project_url)
@@ -590,15 +731,16 @@ class WebScraper:
         parsed = urlparse(url)
         return bool(parsed.scheme and parsed.netloc)
 
-    def _consolidate_data(self, level2_data: Dict[str, Any], level3_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _consolidate_data(self, level2_data: Dict[str, Any], level3_data: Dict[str, Any], scan_id: str = None) -> Dict[str, Any]:
         l2d = ensure_parsed_json(level2_data)
         l3d = ensure_parsed_json(level3_data)
         consolidated = {}
         consolidated.update(l2d)
 
         # Handle requirements with term frequency (new format)
-        l2_requirements = l2d.get("requirements", {})
-        l3_requirements = l3d.get("requirements", {})
+        # Check for both old "requirements" and new "requirements_tf" fields
+        l2_requirements = l2d.get("requirements_tf", l2d.get("requirements", {}))
+        l3_requirements = l3d.get("requirements_tf", l3d.get("requirements", {}))
 
         # Convert to dictionaries if they're not already
         if not isinstance(l2_requirements, dict):
@@ -616,7 +758,8 @@ class WebScraper:
             else:
                 merged_requirements[skill] = count
 
-        consolidated["requirements"] = merged_requirements
+        # Store as requirements_tf (new format)
+        consolidated["requirements_tf"] = merged_requirements
 
         # Also create a list of requirements for backward compatibility
         consolidated["requirements_list"] = list(merged_requirements.keys())
@@ -632,6 +775,18 @@ class WebScraper:
         for field in ["workload", "duration", "budget"]:
             if l3d.get(field) and str(l3d[field]).strip():
                 consolidated[field] = l3d[field]
+
+        # Add fallback for start_date if missing or invalid
+        if not consolidated.get('start_date') or consolidated.get('start_date') == 'N/A' or consolidated.get('start_date') == 'Invalid Date':
+            from backend.utils.date_utils import get_current_date_european
+            current_date = get_current_date_european()
+            consolidated['start_date'] = current_date
+            if scan_id:
+                scraper_logger = logging.getLogger(f"scan.{scan_id}.webscraper")
+            else:
+                scraper_logger = logging.getLogger(__name__)
+            scraper_logger.info(f"Using current date as fallback for start_date: {current_date}")
+
         return consolidated
 
     async def scan_website_stream(self, website_config: Dict[str, Any], time_range: int = 1, existing_project_data=None, scan_id: str = None):
@@ -654,23 +809,122 @@ class WebScraper:
             scraper_logger = logging.getLogger(__name__)
         scraper_logger.info(f"Scanning website {website_config['level1_search']['site_url']}")
 
+        # Initialize current_url with the site URL
         current_url = website_config["level1_search"]["site_url"]
         page_count = 0
         total_projects_processed = 0
         driver = None
+        processed_project_urls = set()
 
         try:
             # Initialize driver for the entire scanning session
             driver = self.setup_driver()
-            driver.get(current_url)
-
-            # Wait for initial page to load
-            project_list_selector = website_config["level1_search"]["project-list-selector"]
             wait = WebDriverWait(driver, 10)
-            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, project_list_selector)))
+            project_list_selector = website_config["level1_search"]["project-list-selector"]
+            stop_pagination = False
 
             # Second loop: Loop through each page with pagination support
-            while True:
+            while not stop_pagination:
+                # Navigate to current page at the beginning of the loop
+                scraper_logger.info(f"Starting iteration with URL: {current_url}")
+                driver.get(current_url)
+
+                # Wait for project list to load
+                wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, project_list_selector)))
+
+                if website_config['level1_search']['next-page-selector'] == "N/A":
+                    stop_pagination = True
+                    scraper_logger.info("Pagination disabled (N/A), stopping after current page")
+
+                # Debug: Check if load-more-selector exists in config
+                scraper_logger.info(f"Checking for load-more-selector in config: {'load-more-selector' in website_config['level1_search']}")
+                if "load-more-selector" in website_config['level1_search']:
+                    scraper_logger.info(f"Load-more-selector found: {website_config['level1_search']['load-more-selector']}")
+
+                # Download all projects available with load more button
+                if "load-more-selector" in website_config['level1_search']:
+                    scraper_logger.info("Downloading all projects with load more button")
+                    load_more_selector = website_config['level1_search']['load-more-selector']
+
+                    # Keep clicking load more until no more projects can be loaded
+                    load_more_attempts = 0
+                    max_load_more_attempts = 50  # Prevent infinite loops
+
+                    while load_more_attempts < max_load_more_attempts:
+                        try:
+                            # Get current project count before clicking
+                            current_soup = BeautifulSoup(driver.page_source, 'html.parser')
+                            current_project_grid = current_soup.select_one(project_list_selector)
+                            current_project_count = len(current_project_grid.select(website_config["level1_search"]["project-entry-selector"])) if current_project_grid else 0
+
+                            scraper_logger.info(f"Current project count: {current_project_count}")
+
+                            # Debug: Check if load more button exists in the HTML
+                            load_more_elements = current_soup.select(load_more_selector)
+                            scraper_logger.info(f"Found {len(load_more_elements)} load more elements with selector: {load_more_selector}")
+
+                            if len(load_more_elements) == 0:
+                                scraper_logger.info("No load more button found in HTML, all projects loaded")
+                                break
+
+                            # Try to find and click the load more button using Selenium
+                            try:
+                                load_more_button = driver.find_element(By.CSS_SELECTOR, load_more_selector)
+                                scraper_logger.info(f"Found load more button: {load_more_button.text}")
+
+                                if not load_more_button.is_displayed():
+                                    scraper_logger.info("Load more button is not visible, all projects loaded")
+                                    break
+
+                                # Click the load more button
+                                driver.execute_script("arguments[0].click();", load_more_button)
+                                scraper_logger.info(f"Clicked load more button (attempt {load_more_attempts + 1})")
+
+                            except Exception as button_error:
+                                scraper_logger.warning(f"Error finding/clicking load more button: {button_error}")
+                                # Try alternative approach - find by text content
+                                try:
+                                    buttons = driver.find_elements(By.TAG_NAME, "button")
+                                    load_more_button = None
+                                    for button in buttons:
+                                        if "weitere Projekte laden" in button.text or "load more" in button.text.lower():
+                                            load_more_button = button
+                                            break
+
+                                    if load_more_button and load_more_button.is_displayed():
+                                        driver.execute_script("arguments[0].click();", load_more_button)
+                                        scraper_logger.info(f"Clicked load more button by text (attempt {load_more_attempts + 1})")
+                                    else:
+                                        scraper_logger.info("No load more button found by text, all projects loaded")
+                                        break
+                                except Exception as text_error:
+                                    scraper_logger.warning(f"Error with text-based button search: {text_error}")
+                                    break
+
+                            # Wait for new content to load
+                            time.sleep(3)
+
+                            # Check if new projects were loaded
+                            new_soup = BeautifulSoup(driver.page_source, 'html.parser')
+                            new_project_grid = new_soup.select_one(project_list_selector)
+                            new_project_count = len(new_project_grid.select(website_config["level1_search"]["project-entry-selector"])) if new_project_grid else 0
+
+                            scraper_logger.info(f"New project count: {new_project_count}")
+
+                            if new_project_count <= current_project_count:
+                                scraper_logger.info(f"No new projects loaded (prev: {current_project_count}, new: {new_project_count}), stopping load more")
+                                break
+                            else:
+                                scraper_logger.info(f"Successfully loaded {new_project_count - current_project_count} new projects")
+
+                            load_more_attempts += 1
+
+                        except Exception as e:
+                            scraper_logger.warning(f"Error during load more attempt {load_more_attempts + 1}: {e}")
+                            break
+
+                    scraper_logger.info(f"Load more process completed after {load_more_attempts} attempts")
+
                 page_count += 1
                 scraper_logger.info(f"Scanning page/load {page_count}")
 
@@ -678,120 +932,72 @@ class WebScraper:
                 soup = BeautifulSoup(driver.page_source, 'html.parser')
                 project_grid = soup.select_one(project_list_selector)
 
-                if not project_grid:
-                    scraper_logger.info(f"No project list found on page {page_count}")
+                try:
+                    project_cards = project_grid.select(website_config["level1_search"]["project-entry-selector"])
+                    scraper_logger.info(f"Found {len(project_cards)} project cards on current page")
+                except Exception as e:
+                    scraper_logger.error(f"Error finding project cards: {e}")
+                    stop_pagination = True
                     break
-
-                project_cards = project_grid.select(website_config["level1_search"]["project-entry-selector"])
-                scraper_logger.info(f"Found {len(project_cards)} project cards on current page")
-
-                if not project_cards:
-                    scraper_logger.info(f"No project cards found on page {page_count}")
-                    break
-
-                # Process each project card on the current page
-                projects_outside_range = 0
-                projects_on_cutoff_date = 0
-                cutoff_date_reached = False
 
                 # Third (inner) loop: Process each project card on the current page
-                for project_card in project_cards:
+                for project_index, project_card in enumerate(project_cards, 1):
                     try:
                         # Extract level 2 data
                         project_level_2_data = await self.level2_scan(project_card, website_config, scan_id)
 
                         # Check, based on the project_level_2_data, whether this project is already in the database
+                        # Do this BEFORE any level3 scans to avoid unnecessary AI calls
                         if existing_project_data:
                             project_url = project_level_2_data.get('url')
                             if project_url and project_url in existing_project_data:
                                 db_project = existing_project_data[project_url]
-                                scraper_logger.info("=========================================================================")
-                                scraper_logger.info(f"Project {db_project['title']} already in database, skipping further processing")
-                                scraper_logger.info("=========================================================================")
-                                # Continue scanning to ensure time range coverage - don't stop pagination
+                                scraper_logger.info(f"Page {page_count}, Project {project_index}: {db_project['title']} already in database, skipping further processing")
                                 continue  # Skip this project but continue with the next one
 
                         # Check if we have release_date from level2, if not we'll need level3
                         release_date = project_level_2_data.get('release_date')
                         title = project_level_2_data.get('title', 'Unknown')
 
-                        # If no release_date from level2, we need to do a quick level3 scan to get it for filtering
-                        if not release_date:
-                            scraper_logger.info(f"No release_date from level2, doing quick level3 scan for filtering: {title}")
-                            project_url = project_level_2_data.get('url')
-                            if project_url:
-                                # Quick level3 scan just for release_date
-                                quick_level3_data = await self.quick_level3_scan(project_url, scan_id)
-                                # Get release_date from level3 - extract the string value from the dictionary
-                                release_date = quick_level3_data.get('release_date')
-                                if isinstance(release_date, dict):
-                                    release_date = release_date.get('release_date')
-                            else:
-                                release_date = None
+                        if release_date: # If we have a release date and its outside the time range, we can spare the level3 scan
+                            if not self._is_within_time_range(release_date, time_range):
+                                # Skip date-based filtering for top projects
+                                if self._is_top_project(project_card):
+                                    scraper_logger.info(f"Page {page_count}, Project {project_index}: Found top project outside time range: {title} (release date: {release_date}) - including anyway")
+                                else:
+                                    scraper_logger.info(f"Page {page_count}, Project {project_index}: Non-top project outside time range found: {title} (release date: {release_date}) - stopping pagination")
+                                    stop_pagination = True
+                                    break  # Break out of the project loop immediately
 
-                        scraper_logger.info(f"Checking project: {title} with release date: {release_date}")
-
-                        # Check if project is significantly outside range (immediate stop condition)
-                        if self._is_significantly_outside_range(release_date, time_range):
-                            # Skip date-based stopping for top projects
-                            if self._is_top_project(project_card):
-                                scraper_logger.info(f"Found top project significantly outside time range: {title} (release date: {release_date}) - ignoring for scan stop")
-                            else:
-                                scraper_logger.info(f"Stopping scan: Found project significantly outside time range: {title} (release date: {release_date})")
-                                return  # Exit the entire scanning process
-
-                        # Check if project is on the cutoff date (signal to stop pagination after this page)
-                        if self._is_on_cutoff_date(release_date, time_range):
-                            # Skip cutoff date logic for top projects
-                            if self._is_top_project(project_card):
-                                scraper_logger.info(f"Found top project on cutoff date: {title} (release date: {release_date}) - ignoring for pagination stop")
-                            else:
-                                scraper_logger.info(f"Found project on cutoff date: {title} (release date: {release_date}) - will stop pagination after this page")
-                                projects_on_cutoff_date += 1
-                                cutoff_date_reached = True
-
-                        # Check if project is outside time range (should trigger cutoff date logic)
-                        if not self._is_within_time_range(release_date, time_range):
-                            # Skip date-based filtering for top projects
-                            if self._is_top_project(project_card):
-                                scraper_logger.info(f"Found top project outside time range: {title} (release date: {release_date}) - including anyway")
-                            else:
-                                scraper_logger.info(f"Project outside time range found: {title} (release date: {release_date})")
-                                projects_outside_range += 1
-                                # Don't continue processing this project, but don't stop pagination yet
-                                # The cutoff date logic will handle stopping pagination after this page
-                                continue
+                        scraper_logger.info(f"Page {page_count}, Project {project_index}: Checking project: {title} with release date: {release_date}")
 
                         # Project passed filtering - now do the full level3 scan for all detailed data
                         project_url = project_level_2_data.get('url')
                         if project_url:
-                            project_level_3_data = await self.level3_scan(project_url, scan_id)
+                            project_level_3_data = await self.level3_scan(project_url, scan_id, website_config)
                         else:
-                            project_level_3_data = {"requirements": []}
+                            project_level_3_data = {"requirements_tf": {}}
 
                         # Consolidate all data (level2 + full level3)
-                        consolidated_data = self._consolidate_data(project_level_2_data, project_level_3_data)
+                        consolidated_data = self._consolidate_data(project_level_2_data, project_level_3_data, scan_id)
                         if "url" not in consolidated_data and project_level_2_data.get('url'):
                             consolidated_data["url"] = project_level_2_data['url']
 
                         total_projects_processed += 1
-                        scraper_logger.info(f"Processed project {total_projects_processed}: {consolidated_data.get('title', 'Unknown')}")
+                        scraper_logger.info(f"Page {page_count}, Project {project_index}: Processed project {total_projects_processed}: {consolidated_data.get('title', 'Unknown')}")
 
                         yield consolidated_data
 
                     except Exception as e:
-                        scraper_logger.error(f"Error processing project card: {e}")
+                        scraper_logger.error(f"Page {page_count}, Project {project_index}: Error processing project card: {e}")
                         continue
 
-                # If we found projects on the cutoff date, stop pagination
-                if cutoff_date_reached:
-                    scraper_logger.info(f"Stopping pagination: Found {projects_on_cutoff_date} projects on cutoff date")
+                # Check if we need to stop pagination due to time range filtering
+                if stop_pagination:
+                    scraper_logger.info(f"Stopping pagination due to non-top project outside time range found on page {page_count}")
                     break
 
-                # If most projects on this page are outside the time range, stop scanning
-                if projects_outside_range > 0 and projects_outside_range >= len(project_cards) * 0.7:  # 70% threshold
-                    scraper_logger.info(f"Stopping scan: {projects_outside_range}/{len(project_cards)} projects on this page are outside time range")
-                    break
+
 
                 # Check for next page or load more functionality
                 next_page_selector = website_config["level1_search"].get("next-page-selector")
@@ -799,34 +1005,136 @@ class WebScraper:
                     scraper_logger.info("No next page selector configured, stopping")
                     break
 
-                # Check if it's a load more button
-                load_more_button = soup.select_one(next_page_selector)
-                if load_more_button and load_more_button.name == 'button':
-                    # Handle load more button
+                # Get fresh soup for pagination check
+                soup = BeautifulSoup(driver.page_source, 'html.parser')
+
+                # Special handling for Freelancermap pagination
+                if website_config['level1_search']['name'] == 'Freelancermap':
+                    # Find all pagination links and get the next page
+                    pagination_links = soup.select(next_page_selector)
+                    next_page_element = None
+                    current_page_num = 1
+
+                    # Try to extract current page number from URL
+                    current_url = driver.current_url
+                    if 'pagenr=' in current_url:
+                        try:
+                            current_page_num = int(current_url.split('pagenr=')[1].split('&')[0])
+                        except (ValueError, IndexError):
+                            current_page_num = 1
+
+                    # Find the link to the next page
+                    for link in pagination_links:
+                        href = link.get('href', '')
+                        if 'pagenr=' in href:
+                            try:
+                                page_num = int(href.split('pagenr=')[1].split('&')[0])
+                                if page_num == current_page_num + 1:
+                                    next_page_element = link
+                                    break
+                            except (ValueError, IndexError):
+                                continue
+
+                    scraper_logger.info(f"Freelancermap pagination: current page {current_page_num}, found {len(pagination_links)} pagination links")
+
+                    # If no next page found, try alternative approach
+                    if not next_page_element:
+                        scraper_logger.info("No next page found with current logic, trying alternative approach")
+                        # Look for any link with a higher page number
+                        for link in pagination_links:
+                            href = link.get('href', '')
+                            if 'pagenr=' in href:
+                                try:
+                                    page_num = int(href.split('pagenr=')[1].split('&')[0])
+                                    if page_num > current_page_num:
+                                        next_page_element = link
+                                        scraper_logger.info(f"Found alternative next page: {page_num}")
+                                        break
+                                except (ValueError, IndexError):
+                                    continue
+                else:
+                    # Standard pagination handling for other websites
+                    next_page_element = soup.select_one(next_page_selector)
+
+                # Debug pagination
+                if next_page_element:
+                    scraper_logger.info(f"Found next page element: {next_page_element.name}, href: {next_page_element.get('href', 'None')}")
+                else:
+                    scraper_logger.info(f"No next page element found with selector: {next_page_selector}")
+
+                # Determine pagination type and handle accordingly
+                if next_page_element and next_page_element.name == 'button':
+                    # LOAD MORE PAGINATION: Projects are appended to the same page
+                    # Need session duplicate tracking to avoid reprocessing
+                    scraper_logger.info("Detected LOAD MORE pagination")
+
+                    prev_project_count = len(project_cards)
+
+                    # Check if load more button is still visible and clickable
+                    try:
+                        load_more_button = driver.find_element(By.CSS_SELECTOR, next_page_selector)
+                        if not load_more_button.is_displayed():
+                            scraper_logger.info("Load more button is not visible, stopping pagination")
+                            break
+                    except Exception:
+                        scraper_logger.info("Load more button not found, stopping pagination")
+                        break
+
+                    # Try to load more projects
                     if await self._load_more_projects(website_config, driver):
                         # Add a small delay after loading more content
                         time.sleep(2)
-                        continue
+                        # Get new project count and updated project list
+                        soup_after = BeautifulSoup(driver.page_source, 'html.parser')
+                        project_grid_after = soup_after.select_one(project_list_selector)
+                        project_cards_after = project_grid_after.select(website_config["level1_search"]["project-entry-selector"]) if project_grid_after else []
+                        new_project_count = len(project_cards_after)
+
+                        # Check if we actually got new projects
+                        if new_project_count <= prev_project_count:
+                            scraper_logger.info(f"No new projects loaded after clicking load more (prev: {prev_project_count}, new: {new_project_count}), stopping scan to prevent infinite loop.")
+                            break
+                        else:
+                            scraper_logger.info(f"Successfully loaded {new_project_count - prev_project_count} new projects (prev: {prev_project_count}, new: {new_project_count})")
+                            # Update the project_cards list to include the newly loaded projects
+                            project_cards = project_cards_after
+                            # Continue the outer while loop to process the newly loaded projects
+                            # Session duplicate tracking will handle skipping already processed projects
+                            continue
                     else:
-                        scraper_logger.info("No more projects to load, stopping")
+                        scraper_logger.info("Load more button not found or not clickable, stopping")
                         break
-                else:
-                    # Handle traditional pagination
-                    if load_more_button and load_more_button.get('href'):
-                        next_page_url = load_more_button.get('href')
+
+                elif next_page_element and (next_page_element.name == 'link' or next_page_element.name == 'a'):
+                    # NEXT PAGE PAGINATION: Projects are on separate pages
+                    # No session duplicate tracking needed since we're on a new page
+                    scraper_logger.info("Detected NEXT PAGE pagination")
+
+                    next_page_url = next_page_element.get('href')
+                    if next_page_url:
                         if not next_page_url.startswith('http'):
                             next_page_url = urljoin(driver.current_url, next_page_url)
 
-                        # Navigate to next page
-                        driver.get(next_page_url)
-                        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, project_list_selector)))
-                        time.sleep(2)  # Small delay between pages
-                        continue
-                    else:
-                        scraper_logger.info("No next page found, stopping pagination")
+                        scraper_logger.info(f"Next page URL determined: {next_page_url}")
+                        # Update current_url for next iteration
+                        current_url = next_page_url
+                        # Add a small delay to ensure page is fully loaded
+                        time.sleep(2)
+                        # Break out of the inner loop to continue with the new URL in the outer loop
+                        scraper_logger.info("Breaking inner loop to continue with new URL in outer loop")
+                        scraper_logger.info(f"Will continue with URL: {current_url}")
                         break
+                    else:
+                        scraper_logger.info("No next page URL found, stopping pagination")
+                        break
+                else:
+                    scraper_logger.info("No next page element found, stopping pagination")
+                    scraper_logger.info(f"Current URL: {driver.current_url}")
+                    scraper_logger.info(f"Available pagination links: {[link.get('href', 'None') for link in soup.select(next_page_selector)]}")
+                    break
 
             scraper_logger.info(f"Completed scanning {page_count} pages/loads, processed {total_projects_processed} projects")
+            scraper_logger.info(f"Final stop_pagination value: {stop_pagination}")
 
         except Exception as e:
             scraper_logger.error(f"Error during scanning: {e}")

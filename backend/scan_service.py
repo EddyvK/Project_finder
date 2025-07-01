@@ -141,9 +141,9 @@ class ScanService:
                                 workload=project_data.get("workload")
                             )
 
-                            if project_data.get("requirements"):
-                                # Handle requirements format with term frequency
-                                requirements_data = project_data["requirements"]
+                            # Handle requirements_tf field (new format) or fallback to requirements (old format)
+                            requirements_data = project_data.get("requirements_tf", project_data.get("requirements"))
+                            if requirements_data:
                                 if isinstance(requirements_data, dict):
                                     # Store term frequency data
                                     project.set_requirements_tf(requirements_data)
@@ -314,12 +314,19 @@ class ScanService:
                             project_logger.info(f"Sending progress message: {progress_msg.strip()}")
                             yield progress_msg
 
+                            # Add fallback for start_date if missing or invalid
+                            start_date = project_data.get("start_date")
+                            if not start_date or start_date == 'N/A' or start_date == 'Invalid Date':
+                                from backend.utils.date_utils import get_current_date_european
+                                start_date = get_current_date_european()
+                                project_logger.info(f"Using current date as fallback for start_date: {start_date}")
+
                             # Create project using existing logic
                             project = Project(
                                 title=project_data.get("title", ""),
                                 description=project_data.get("description"),
                                 release_date=project_data.get("release_date"),
-                                start_date=project_data.get("start_date"),
+                                start_date=start_date,
                                 location=project_data.get("location"),
                                 tenderer=project_data.get("tenderer"),
                                 project_id=project_data.get("project_id"),
@@ -330,9 +337,9 @@ class ScanService:
                                 workload=project_data.get("workload")
                             )
 
-                            if project_data.get("requirements"):
-                                # Handle requirements format with term frequency
-                                requirements_data = project_data["requirements"]
+                            # Handle requirements_tf field (new format) or fallback to requirements (old format)
+                            requirements_data = project_data.get("requirements_tf", project_data.get("requirements"))
+                            if requirements_data:
                                 if isinstance(requirements_data, dict):
                                     # Store term frequency data
                                     project.set_requirements_tf(requirements_data)

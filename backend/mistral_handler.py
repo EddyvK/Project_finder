@@ -167,7 +167,7 @@ class MistralHandler:
                     - location (string)
                     - tenderer (string)
                     - project_id (string)
-                    - requirements(dictionary of strings (requirement) and integers (Number of occurences on project-specific
+                    - requirements_tf(dictionary of strings (requirement) and integers (Number of occurences on project-specific
                         web-page including title and description))
                     - workload (string)
                     - rate (string or number)
@@ -188,7 +188,7 @@ class MistralHandler:
                         'On-site' or 'Berlin' or another geographical designation
                     - tenderer, i.e. the company that is offering the project
                     - project_id, i.e anbieter-spezifischer-id for the project (string)
-                    - requirements, i.e. the skills ('Anforderungen', 'Qualifikationen', 'Fähigkeiten' or similar) required for
+                    - requirements_tf, i.e. the skills ('Anforderungen', 'Qualifikationen', 'Fähigkeiten' or similar) required for
                         the project; If no requirements are mentioned explicitly, determine them from the project description
                         or from the project title. Requirements are to consist of two core words maximum e.g. 'Schreiben von
                         Dokumentation' is shortened to 'Dokumentation', 'Zielbild' instead of 'Entwicklung eines Zielbildes',

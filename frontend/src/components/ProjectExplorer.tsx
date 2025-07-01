@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import axios from 'axios';
 import { api, endpoints, SSEStream, SSEEvent, cancellationApi } from '../services/api';
 import DatabaseInspection from './DatabaseInspection';
 import { formatDateForDisplay } from '../utils/dateUtils';
@@ -53,7 +54,10 @@ const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onProjectSelect, onTe
   useEffect(() => {
     const checkScanStatus = async () => {
       try {
-        const response = await api.get(endpoints.scanStatus);
+        // Use a shorter timeout for status check
+        const response = await axios.get('/api' + endpoints.scanStatus, {
+          timeout: 5000, // 5 seconds timeout for status check
+        });
         const { is_active } = response.data;
 
         if (is_active) {
@@ -61,8 +65,11 @@ const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onProjectSelect, onTe
           setIsStreaming(true);
           setStreamStatus('Another scan is already in progress...');
         }
-      } catch (error) {
-        console.error('Error checking scan status:', error);
+      } catch (error: any) {
+        // Don't log timeout errors as they're expected if backend is not running
+        if (error.code !== 'ECONNABORTED' && error.code !== 'ERR_NETWORK') {
+          console.error('Error checking scan status:', error);
+        }
       }
     };
 
@@ -156,7 +163,7 @@ const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onProjectSelect, onTe
       setSseStream(null);
     }
 
-    const streamUrl = endpoints.scanStream(timeRange);  // Use the endpoints helper
+    const streamUrl = '/api' + endpoints.scanStream(timeRange);  // Add /api prefix for EventSource
     const newSseStream = new SSEStream(streamUrl, handleSSEEvent);
 
     // Reset the stream to allow new connections
@@ -200,12 +207,13 @@ const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onProjectSelect, onTe
             break;
           }
 
+          // Mark as processed immediately to prevent duplicates
+          processedProjectIds.current.add(event.data.id);
+
           setProjects(prevProjects => {
-            // Check if project already exists in current state
+            // Double-check if project already exists in current state
             const exists = prevProjects.some(p => p.id === event.data.id);
             if (!exists) {
-              // Mark as processed and add to list
-              processedProjectIds.current.add(event.data.id);
               console.log('SSE: Adding project to list:', event.data.title, '(ID:', event.data.id, ')');
               return [event.data, ...prevProjects];
             }
@@ -469,9 +477,14 @@ const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onProjectSelect, onTe
               onClick={() => handleProjectClick(project)}
             >
               <div className="project-title">{project.title}</div>
-              {project.release_date && (
-                <div className="project-date">{formatDate(project.release_date)}</div>
-              )}
+              <div className="project-meta">
+                {project.release_date && (
+                  <div className="project-date">{formatDate(project.release_date)}</div>
+                )}
+                {project.tenderer && (
+                  <div className="project-tenderer">{project.tenderer}</div>
+                )}
+              </div>
             </div>
           ))
         )}
